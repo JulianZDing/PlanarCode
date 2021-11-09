@@ -1,8 +1,9 @@
 import numpy as np
 
-DEFAULT_BOUNDS = np.array([1, 1, 0, 0], dtype=int)
+DEFAULT_BOUNDS = np.array((1,0), dtype=int)
 
-class BoundaryException(Exception): pass
+class OperatorException(Exception): pass
+class LogicalException(Exception): pass
 
 class PlanarCode:
     
@@ -16,8 +17,10 @@ class PlanarCode:
         
         Keyword arguments:
         W -- width of planar code, if different from length (default: same as length)
-        boundaries -- boolean array for smoothness of (primal lattice) boundaries
-                      (left, right, down, up; default: [1, 1, 0, 0])
+        boundaries -- integer array for smoothness of boundaries (horizontal, vertical)
+                      - 0: rough boundary
+                      - 1: smooth boundary
+                      - 2: periodic boundary
         p -- error probability for each edge operator (default: 0)
         p_dual -- error probability for each plaquette "edge" operator (default: same as primal_p)
         '''
@@ -27,8 +30,14 @@ class PlanarCode:
         boundaries_dual = np.copy(boundaries)
         boundaries_dual[boundaries == PlanarLattice.SMOOTH] = PlanarLattice.ROUGH
         boundaries_dual[boundaries == PlanarLattice.ROUGH] = PlanarLattice.SMOOTH
-        L_dual = L - np.sum(boundaries_dual[:2] != PlanarLattice.ROUGH) + 1
-        W_dual = W - np.sum(boundaries_dual[2:] != PlanarLattice.ROUGH) + 1
+        L_dual = (
+            L - np.sum(boundaries_dual[0] == PlanarLattice.SMOOTH)
+            + np.sum(boundaries_dual[0] == PlanarLattice.ROUGH)
+        )
+        W_dual = (
+            W - np.sum(boundaries_dual[1] == PlanarLattice.SMOOTH)
+            + np.sum(boundaries_dual[1] == PlanarLattice.ROUGH)
+        )
         p_dual = p if p_dual is None else p_dual
         self.dual = PlanarLattice(L_dual, W_dual, boundaries_dual, p_dual)
         
@@ -37,7 +46,7 @@ class PlanarCode:
 
 
     def advance(self, ticks=1):
-        '''Apply stochastic errors primal and dual lattices
+        '''Apply stochastic errors on primal and dual lattices
         
         Arguments:
         ticks -- number of time steps to advance
@@ -88,7 +97,7 @@ class PlanarLattice:
         Arguments:
         L -- length of lattice in number of sites (includes missing sites on rough boundaries)
         W -- width of lattice in number of sites (includes missing sites on rough boundaries)
-        boundaries -- integer array for smoothness of boundaries (left, right, down, up)
+        boundaries -- integer array for smoothness of boundaries (horizontal, vertical)
                       - 0: rough boundary
                       - 1: smooth boundary
                       - 2: periodic boundary
@@ -97,16 +106,7 @@ class PlanarLattice:
         '''
         self.shape = np.array((L, W))
         self.grid = np.indices(self.shape)
-
         self.boundaries = np.array(boundaries, dtype=int)
-        periodic_x = boundaries[:PlanarLattice.D] == PlanarLattice.PERIODIC
-        if np.any(periodic_x) and not np.all(periodic_x):
-            raise BoundaryException(
-                'Periodic condition for left and right boundaries does not match.')
-        periodic_y = boundaries[PlanarLattice.D:] == PlanarLattice.PERIODIC
-        if np.any(periodic_y) and not np.all(periodic_y):
-            raise BoundaryException(
-                'Periodic condition for bottom and top boundaries does not match.')
         
         self.sites = self._generate_lattice_sites()
         # [x, y, 0] for horizontal edge, [x, y, 1] for vertical edge
@@ -122,6 +122,52 @@ class PlanarLattice:
             raise IndexError(
                 f'Error probability array of shape {p.shape} does not match a lattice with edge dimensions {self.edges.shape}')
         self.p = p
+
+
+    def apply_edge_operators(self, targets):
+        '''Apply edge operators
+
+        Arguments:
+        targets -- list of site coordinates or edge coordinates
+                   If target is a string of site coordinates,
+                   the sites must be next to each other
+        '''
+        if len(targets) == 0:
+            return
+        length = len(targets[0])
+        if length == len(self.shape):
+            self._apply_edge_operators_sites(targets)
+        elif length == len(self.edges.shape):
+            self._apply_edge_operators_edges(targets)
+        else:
+            raise OperatorException(
+                f'Coordinates of length {length} do not match dimensions of sites or edges.')
+    
+    
+    def apply_edge_operator(self, select):
+        '''Apply edge operators identified by a coordinate tuple or index/boolean array'''
+        self.edges[select] = ~self.edges[select]
+    
+
+    def _apply_edge_operators_sites(self, sites):
+        if len(sites) < 2:
+            raise OperatorException(
+                '1 site coordinate does not adequately identify an edge.')
+        edge_list = []
+        prev = sites[0]
+        for curr in sites[1:]:
+            deltas = np.array(curr) - np.array(prev)
+            if np.sum(np.abs(deltas)) != 1:
+                raise OperatorException(
+                    f'Sites {prev} and {curr} are not adjacent.')
+            d = np.argmax(np.abs(deltas))
+            edge_list.append([*prev, d] if deltas[d] > 0 else [*curr, d])
+        self._apply_edge_operators_edges(edge_list)
+
+
+    def _apply_edge_operators_edges(self, edges):
+        for edge in edges:
+            self.apply_edge_operator(edge)
 
 
     def apply_errors(self):
@@ -157,6 +203,25 @@ class PlanarLattice:
         syndrome[~self.sites] = False
         return syndrome
 
+
+    def detect_logical_error(self, initial_z=0):
+        '''Detect whether or not a logical error has occurred
+
+        Applies a logical X operation (plaquette cycle with no boundary)
+        and checks number of intersections with edge operators (modulo 2).
+
+        Keyword arguments:
+        initial_z -- whether a logical Z was already applied to the lattice
+
+        Returns True if a logical error has occurred, False if not
+        '''
+        if np.sum(self.measure_syndrome()) > 0:
+            raise LogicalException(
+                'Non-trivial syndrome detected; lattice is not in the codespace.')
+        
+        L, W = self.shape
+
+
     
     def reset(self):
         '''Reset the error state of the lattice'''
@@ -173,11 +238,13 @@ class PlanarLattice:
         # Set smoothness of boundaries
         select_x = np.ones(sites.shape[0], dtype=bool)
         select_y = np.ones(sites.shape[1], dtype=bool)
-        wall_masks = [(0, select_y), (-1, select_y), (select_x, 0), (select_x, -1)]
+        wall_masks = [((0, select_y), (-1, select_y)), ((select_x, 0), (select_x, -1))]
         for i, b in enumerate(self.boundaries):
             if b == PlanarLattice.ROUGH:
-                sites[wall_masks[i]] = False
+                for wall in wall_masks[i]:
+                    sites[wall] = False
         return sites
+
 
     def _endpoint_coords(self):
         '''Generate an array with coordinates of endpoint sites for all edges
@@ -190,7 +257,7 @@ class PlanarLattice:
         for d in range(D):
             start = self.grid
             end = np.copy(self.grid)
-            if self.boundaries[2*d] == PlanarLattice.PERIODIC:
+            if self.boundaries[d] == PlanarLattice.PERIODIC:
                 end[d] = (end[d] + 1) % self.shape[d]
             else:
                 end[d] += 1

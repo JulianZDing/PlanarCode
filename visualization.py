@@ -2,8 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from planar_code import PlanarLattice
-from graph_operations import unpack_vkey
-from matching import min_weight_matching
+from graph_operations import *
 
 PRIMAL_EDGES = {'color': 'black', 'linestyle': 'solid', 'linewidth': 1, 'zorder': 1}
 PRIMAL_SITES = {'color': 'black', 's': 50, 'marker': 'o', 'zorder': 1}
@@ -49,7 +48,7 @@ def plot_planar_code(code, plot_dual=True, show_errors=False, show_syndrome=Fals
         boundaries = primal.boundaries
         dual = code.dual
         x_offset = 0.5 * (1 if boundaries[0] != PlanarLattice.SMOOTH else -1)
-        y_offset = 0.5 * (1 if boundaries[2] != PlanarLattice.SMOOTH else -1)
+        y_offset = 0.5 * (1 if boundaries[1] != PlanarLattice.SMOOTH else -1)
         plot_sites(
             ax, dual, x_offset=x_offset, y_offset=y_offset, **DUAL_SITES)
         plot_edges(
@@ -90,7 +89,7 @@ def plot_edges(
             )
             upper = (
                 s0y == W-1 and s0y > s1y
-                and lattice.boundaries[2] == PlanarLattice.PERIODIC
+                and lattice.boundaries[1] == PlanarLattice.PERIODIC
                 and lattice.sites[s0]
             )
             if right and upper:
@@ -138,27 +137,6 @@ def asymptotic_length_scale(x, base=1, maximum=50):
     return x
 
 
-def plot_lattice_graph(adjacency, L):
-    '''Sanity check for graph translation'''
-    fig, ax = plt.subplots(1, 1, figsize=(2*L, 2*L))
-    ax.set_aspect('equal')
-    ax.grid(False)
-    graph = {}
-    for v0, subdict in adjacency.items():
-        for v1, weight in subdict.items():
-            graph[tuple(sorted([v0,v1]))] = weight
-    for (v0, v1), dist in graph.items():
-        v0x, v0y = unpack_vkey(v0, L)
-        v1x, v1y = unpack_vkey(v1, L)
-        ax.plot((v0x, v1x), (v0y, v1y), **PRIMAL_EDGES)
-        ax.text(
-            (v0x+v1x)/2, (v0y+v1y)/2,
-            s=str(round(dist,3)), fontsize=14, color='blue', zorder=10
-        )
-    ax.set_xlim(-0.5, max(L-0.5, ax.get_xlim()[-1]))
-    ax.set_ylim(-0.5, max(L-0.5, ax.get_ylim()[-1]))
-
-
 def plot_matchings(lattice, syndrome, force_manhattan=False):
     '''Plot syndrome matching pairs'''
     L, W = lattice.shape
@@ -170,8 +148,7 @@ def plot_matchings(lattice, syndrome, force_manhattan=False):
     )
     plot_syndrome(ax, lattice, syndrome, **PRIMAL_SYNDROME)
 
-    matching = min_weight_matching(
-        lattice, syndrome, force_manhattan=force_manhattan)
+    matching, paths = min_weight_syndrome_matching(lattice, syndrome)
     for i, pair in enumerate(matching):
         valid_pair = []
         for coord in pair:
@@ -181,7 +158,10 @@ def plot_matchings(lattice, syndrome, force_manhattan=False):
             x, y = coord
             ax.text(x, y, s=str(i), c='green', fontsize=20, zorder=10)
         if len(valid_pair) > 1:
-            s0, s1 = valid_pair
-            s0x, s0y = s0
-            s1x, s1y = s1
-            ax.plot((s0x, s1x), (s0y, s1y), c='green', linewidth=5, zorder=9)
+            path = paths[i]
+            print(path)
+            s0x, s0y = path[0]
+            for s1x, s1y in path[1:]:
+                ax.plot((s0x, s1x), (s0y, s1y), c='green', linewidth=5, zorder=9)
+                s0x = s1x
+                s0y = s1y
