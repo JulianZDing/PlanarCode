@@ -104,9 +104,17 @@ class PlanarLattice:
         p -- error probability for each edge operator
              (either single value, or array with same shape as lattice)
         '''
+        if L < 2 or W < 2:
+            raise LogicalException('Lattices with length/width < 2 have no plaquettes.')
+
         self.shape = np.array((L, W))
         self.grid = np.indices(self.shape)
         self.boundaries = np.array(boundaries, dtype=int)
+        both_smooth = np.all(self.boundaries == PlanarLattice.SMOOTH)
+        both_rough = np.all(self.boundaries == PlanarLattice.ROUGH)
+        if both_smooth or both_rough:
+            raise LogicalException(
+                'Lattices with all rough or all smooth boundaries cannot encode a qubit.')
         
         self.sites = self._generate_lattice_sites()
         # [x, y, 0] for horizontal edge, [x, y, 1] for vertical edge
@@ -161,7 +169,8 @@ class PlanarLattice:
                 raise OperatorException(
                     f'Sites {prev} and {curr} are not adjacent.')
             d = np.argmax(np.abs(deltas))
-            edge_list.append([*prev, d] if deltas[d] > 0 else [*curr, d])
+            edge_list.append((*prev, d) if deltas[d] > 0 else (*curr, d))
+            prev = curr
         self._apply_edge_operators_edges(edge_list)
 
 
@@ -204,7 +213,7 @@ class PlanarLattice:
         return syndrome
 
 
-    def detect_logical_error(self, initial_z=0):
+    def detect_logical_errors(self, initial_z=0):
         '''Detect whether or not a logical error has occurred
 
         Applies a logical X operation (plaquette cycle with no boundary)
@@ -212,15 +221,26 @@ class PlanarLattice:
 
         Keyword arguments:
         initial_z -- whether a logical Z was already applied to the lattice
+                    (default: 0; can be an array of 2 elements if 2 qubits are encoded)
 
-        Returns True if a logical error has occurred, False if not
+        Returns the number of logical errors detected
         '''
         if np.sum(self.measure_syndrome()) > 0:
             raise LogicalException(
                 'Non-trivial syndrome detected; lattice is not in the codespace.')
         
         L, W = self.shape
-
+        nontrivial = self.boundaries != PlanarLattice.SMOOTH
+        dims = [d for d in range(PlanarLattice.D) if nontrivial[d]]
+        errors = 0
+        for d in dims:
+            check_row = self.shape[d] // 2
+            indices = {d: check_row, (self.edges.ndim-1): d}
+            ix = tuple([indices.get(i, slice(None)) for i in range(self.edges.ndim)])
+            this_z = initial_z if not isinstance(initial_z, np.ndarray) else initial_z[d]
+            intersections = np.sum(self.edges[ix])
+            errors += int((intersections % 2) != this_z)
+        return errors
 
     
     def reset(self):

@@ -159,9 +159,9 @@ def plot_matchings(lattice, syndrome, force_manhattan=False):
             ax.text(x, y, s=str(i), c='green', fontsize=20, zorder=10)
         if len(valid_pair) > 1:
             path = paths[i]
-            print(path)
             s0x, s0y = path[0]
             for s1x, s1y in path[1:]:
-                ax.plot((s0x, s1x), (s0y, s1y), c='green', linewidth=5, zorder=9)
+                if s1x < L and s1y < W:
+                    ax.plot((s0x, s1x), (s0y, s1y), c='green', linewidth=5, zorder=9)
                 s0x = s1x
                 s0y = s1y
