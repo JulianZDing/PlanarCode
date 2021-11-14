@@ -137,7 +137,7 @@ def asymptotic_length_scale(x, base=1, maximum=50):
     return x
 
 
-def plot_matchings(lattice, syndrome, force_manhattan=False):
+def plot_matchings(lattice, syndrome, pathfinding=None):
     '''Plot syndrome matching pairs'''
     L, W = lattice.shape
     fig, ax = plt.subplots(1, 1, figsize=(L,L))
@@ -148,7 +148,7 @@ def plot_matchings(lattice, syndrome, force_manhattan=False):
     )
     plot_syndrome(ax, lattice, syndrome, **PRIMAL_SYNDROME)
 
-    matching, paths = min_weight_syndrome_matching(lattice, syndrome)
+    matching, paths = min_weight_syndrome_matching(lattice, syndrome, pathfinding)
     for i, pair in enumerate(matching):
         valid_pair = []
         for coord in pair:

@@ -4,10 +4,20 @@ import networkx as nx
 from collections import defaultdict
 from networkx.algorithms.shortest_paths.weighted import single_source_dijkstra
 from networkx.algorithms.matching import min_weight_matching
-from planar_code import PlanarCode, PlanarLattice
+from planar_code import PlanarLattice
 
 
 ANCILLA_WEIGHT = 0.5
+MANHATTAN = 'manhattan'
+DIJKSTRA = 'dijkstra'
+
+def p_to_dist(p):
+    return np.log((1-p) / p)
+
+def is_real_site(lattice, v):
+    L, W = lattice.shape
+    x, y = v
+    return x < L and y < W
 
 
 def lattice_to_graph(lattice):
@@ -39,25 +49,27 @@ def lattice_to_graph(lattice):
     return graph
 
 
-def min_weight_syndrome_matching(lattice, syndrome):
+def min_weight_syndrome_matching(lattice, syndrome, pathfinding=None):
     '''Match syndromes along paths of maximum error probability
 
     Arguments:
     lattice -- PlanarLattice instance
     syndrome -- lattice.shape boolean array marking nontrivial syndromes
 
+    Positional arguments:
+    pathfinding -- whether to force dijkstra/Manhattan pathfinding
+                   (default: None; options: "dijkstra", "manhattan")
+
     Returns a list of pairs of coordinates corresponding to matching syndromes
     and a corresponding list of paths to complete each pairing
     '''
-    L, W = lattice.shape
-    matching_graph, paths = syndrome_to_matching_graph(lattice, syndrome)
+    matching_graph, paths = syndrome_to_matching_graph(lattice, syndrome, pathfinding)
     matched_labels = min_weight_matching(matching_graph, maxcardinality=True)
     matching = []
     for pair in matched_labels:
         matched_pair = []
         for coords in pair:
-            x, y = coords
-            if x < L and y < W:
+            if is_real_site(lattice, coords):
                 matched_pair.append(coords)
             else:
                 ancilla = coords
@@ -65,15 +77,14 @@ def min_weight_syndrome_matching(lattice, syndrome):
             if len(matched_pair) < 2:
                 matched_pair.append(ancilla)
                 i, j = matched_pair
-                if paths[i][j][0] == ancilla:
-                    del paths[i][j][0]
-                else:
-                    del paths[i][j][-1]
+                for k in [0, -1]:
+                    if not is_real_site(lattice, paths[i][j][k]):
+                        del paths[i][j][k]
             matching.append(matched_pair)
     return matching, [paths[i][j] for i, j in matching]
 
 
-def syndrome_to_matching_graph(lattice, syndrome, force_manhattan=False):
+def syndrome_to_matching_graph(lattice, syndrome, pathfinding=None):
     '''Represent a syndrome as a fully connected graph
 
     Sites with nontrivial syndrome measurements are connected via
@@ -89,21 +100,25 @@ def syndrome_to_matching_graph(lattice, syndrome, force_manhattan=False):
     syndrome -- lattice.shape boolean array marking nontrivial syndromes
 
     Positional arguments:
-    force_manhattan -- use Manhattan distance calculation regardless of error model
+    pathfinding -- whether to force dijkstra/Manhattan pathfinding
+                   (default: None; options: "dijkstra", "manhattan")
 
     Returns translated graph as nx.Graph instance,
     and paths dictionary with the lowest-distance paths between all syndromes
     '''
-    L, W = lattice.shape
     xs, ys = lattice.grid[:, syndrome]
     syndrome_coords = list(zip(xs, ys))
-    # Use Manhattan distance if error probabilities are uniform
-    if lattice.uniform_p is not None or force_manhattan:
-        graph, paths = manhattan_graph(lattice, syndrome_coords)
-    # Otherwise, use Dijkstra's algorithm
+    # Use Manhattan distance pathfinding by default
+    # if error probabilities are uniform
+    if lattice.uniform_p is not None:
+        graph_func = manhattan_graph
     else:
-        graph, paths = dijkstra_graph(lattice, syndrome_coords)
-    return graph, paths
+        graph_func = dijkstra_graph
+    if pathfinding == MANHATTAN:
+        graph_func = manhattan_graph
+    elif pathfinding == DIJKSTRA:
+        graph_func = dijkstra_graph
+    return graph_func(lattice, syndrome_coords)
 
 
 def manhattan_graph(lattice, coords):
@@ -123,7 +138,7 @@ def manhattan_graph(lattice, coords):
 
     for i, v0 in enumerate(coords[:-1]):
         for v1 in coords[i+1:]:
-            add_path(v0,v1)
+            add_path(v0, v1)
     rough_vertices = get_rough_vertices(lattice, len(coords))
     if rough_vertices:
         # Connect rough vertices to each other
@@ -136,9 +151,13 @@ def manhattan_graph(lattice, coords):
 
 
 def manhattan_distance(lattice, v0, v1, make_path=False):
+    if not is_real_site(lattice, v0):
+        v0 = manhattan_nearest_rough(lattice, v1)
+    if not is_real_site(lattice, v1):
+        v1 = manhattan_nearest_rough(lattice, v0)
     deltas = []
     directions = []
-    for d in range(PlanarLattice.D):
+    for d in range(lattice.shape.size):
         start = v0[d]
         stop = v1[d]
         delta = abs(stop - start)
@@ -156,31 +175,31 @@ def manhattan_distance(lattice, v0, v1, make_path=False):
         directions.append(direction)
     if not make_path:
         return sum(deltas)
-    path = []
+    path = [v0]
     base = list(v0)
-    for d in range(PlanarLattice.D):
+    for d in range(lattice.shape.size):
         direction = directions[d]
         start = v0[d]
-        this_base = base
         for i in range(deltas[d]):
-            this_base[d] = start + direction*(i+1)
-            path.append(list(this_base))
-        base[d] = v1[d]
+            base[d] = start + direction*(i+1)
+            path.append(tuple(base))
     return sum(deltas), path
 
 
-def manhattan_dist_to_rough(lattice, v0):
-    L, W = lattice.shape
-    x, y = v0
-    horizontal, vertical = (lattice.boundaries == PlanarLattice.ROUGH)
-    deltas = []
-    if horizontal:
-        deltas.append(x)
-        deltas.append(L-1-x)
-    if vertical:
-        deltas.append(y)
-        deltas.append(W-1-y)
-    return min(deltas)
+def manhattan_nearest_rough(lattice, v):
+    if not is_real_site(lattice, v):
+        return v
+    for d in range(lattice.shape.size):
+        if lattice.boundaries[d] != PlanarLattice.ROUGH:
+            continue
+        L = lattice.shape[d]
+        x = v[d]
+        deltas = [(x, -1), (L-1-x, 1)]
+        break
+    rv = list(v)
+    moves, direction = min(deltas)
+    rv[d] += moves * direction
+    return tuple(rv)
 
 
 def dijkstra_graph(lattice, homes):
@@ -238,7 +257,3 @@ def get_rough_vertices(lattice, how_many):
         L, W = lattice.shape
         return [(L,W+i) for i in range(how_many)]
     return None
-
-
-def p_to_dist(p):
-    return np.log((1-p) / p)

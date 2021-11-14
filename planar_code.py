@@ -82,7 +82,6 @@ class PlanarCode:
 class PlanarLattice:
 
     ROUGH, SMOOTH, PERIODIC = (0, 1, 2)
-    D = 2
 
     def __init__(self, L, W, boundaries, p):
         '''Class definition of a rectangular planar lattice.
@@ -116,11 +115,11 @@ class PlanarLattice:
             raise LogicalException(
                 'Lattices with all rough or all smooth boundaries cannot encode a qubit.')
         
-        self.sites = self._generate_lattice_sites()
         # [x, y, 0] for horizontal edge, [x, y, 1] for vertical edge
         # edges with active errors have True values
-        self.edges = np.zeros((L, W, PlanarLattice.D), dtype=bool)
+        self.edges = np.zeros((L, W, self.shape.size), dtype=bool)
         self.edge_endpoints = self._endpoint_coords()
+        self._set_lattice_sites()
         
         self.uniform_p = None
         if not isinstance(p, np.ndarray):
@@ -155,6 +154,8 @@ class PlanarLattice:
     def apply_edge_operator(self, select):
         '''Apply edge operators identified by a coordinate tuple or index/boolean array'''
         self.edges[select] = ~self.edges[select]
+        if self.rough_edge_mask is not None:
+            self.edges[self.rough_edge_mask] = False
     
 
     def _apply_edge_operators_sites(self, sites):
@@ -183,7 +184,7 @@ class PlanarLattice:
         '''Apply errors on edge operators according to self.p'''
         probs = np.random.rand(*self.edges.shape)
         errors = self.p > probs
-        self.edges[errors] = ~self.edges[errors]
+        self.apply_edge_operator(errors)
 
     
     def measure_syndrome(self):
@@ -198,7 +199,7 @@ class PlanarLattice:
         # Quasi-particle pair creation
         xs, ys = self.edge_endpoints[:, self.edges]
         valid = None
-        for d in range(PlanarLattice.D):
+        for d in range(self.shape.size):
             this_valid = (xs[:,d] < L) & (ys[:,d] < W)
             if valid is None:
                 valid = this_valid
@@ -231,7 +232,7 @@ class PlanarLattice:
         
         L, W = self.shape
         nontrivial = self.boundaries != PlanarLattice.SMOOTH
-        dims = [d for d in range(PlanarLattice.D) if nontrivial[d]]
+        dims = [d for d in range(self.shape.size) if nontrivial[d]]
         errors = 0
         for d in dims:
             check_row = self.shape[d] // 2
@@ -248,22 +249,28 @@ class PlanarLattice:
         self.edges = np.zeros(self.edges.shape, dtype=bool)
         
     
-    def _generate_lattice_sites(self):
-        '''Generate a boolean array of planar code sites
+    def _set_lattice_sites(self):
+        '''Set planar code sites and edge mask based on roughness of boundaries
         
         A True site means a site is present
         A False site denotes a hole or part of a rough boundary
         '''
-        sites = np.ones(self.shape, dtype=bool)
+        self.sites = np.ones(self.shape, dtype=bool)
         # Set smoothness of boundaries
-        select_x = np.ones(sites.shape[0], dtype=bool)
-        select_y = np.ones(sites.shape[1], dtype=bool)
-        wall_masks = [((0, select_y), (-1, select_y)), ((select_x, 0), (select_x, -1))]
+        select = slice(None)
+        ends = [0,-1]
+        self.rough_edge_mask = None
         for i, b in enumerate(self.boundaries):
             if b == PlanarLattice.ROUGH:
-                for wall in wall_masks[i]:
-                    sites[wall] = False
-        return sites
+                dim_range = range(self.shape.size)
+                indices = {
+                    i: ends,
+                    (self.edges.ndim-1): [j for j in dim_range if j != i]
+                }
+                ix = tuple([indices.get(j, select) for j in dim_range])
+                self.sites[ix] = False
+                self.rough_edge_mask = tuple([
+                    indices.get(j, select) for j in range(self.edges.ndim)])
 
 
     def _endpoint_coords(self):
