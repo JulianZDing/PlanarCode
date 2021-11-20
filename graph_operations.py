@@ -3,13 +3,14 @@ import networkx as nx
 
 from collections import defaultdict
 from networkx.algorithms.shortest_paths.weighted import single_source_dijkstra
-from networkx.algorithms.matching import min_weight_matching
+from networkx.algorithms.matching import max_weight_matching
 from planar_code import PlanarLattice
 
 
-ANCILLA_WEIGHT = 0.5
+ANCILLA_WEIGHT = 0
 MANHATTAN = 'manhattan'
 DIJKSTRA = 'dijkstra'
+WEIGHT_KEY = 'weight'
 
 def p_to_dist(p):
     return np.log((1-p) / p)
@@ -28,7 +29,6 @@ def lattice_to_graph(lattice):
 
     Returns nx.Graph instance
     '''
-    L, W = lattice.shape
     X, Y, D = lattice.edges.shape
     graph = nx.Graph()
     for x in range(X):
@@ -37,13 +37,13 @@ def lattice_to_graph(lattice):
                 vx, vy = lattice.edge_endpoints[:, x, y, d]
                 v0x, v1x = vx
                 v0y, v1y = vy
-                if v1x >= L or v1y >=W:
+                v0 = (v0x, v0y)
+                v1 = (v1x, v1y)
+                if not is_real_site(lattice, v1):
                     continue
-                v0_is_site = lattice.sites[v0x, v0y]
-                v1_is_site = lattice.sites[v1x, v1y]
+                v0_is_site = lattice.sites[v0]
+                v1_is_site = lattice.sites[v1]
                 if v0_is_site or v1_is_site:
-                    v0 = (v0x, v0y)
-                    v1 = (v1x, v1y)
                     weight = p_to_dist(lattice.p[x, y, d])
                     graph.add_edge(v0, v1, weight=weight)
     return graph
@@ -64,7 +64,16 @@ def min_weight_syndrome_matching(lattice, syndrome, pathfinding=None):
     and a corresponding list of paths to complete each pairing
     '''
     matching_graph, paths = syndrome_to_matching_graph(lattice, syndrome, pathfinding)
-    matched_labels = min_weight_matching(matching_graph, maxcardinality=True)
+    # Transform from min weight to max weight matching problem
+    max_weight = 0
+    for v0, v1, weight in matching_graph.edges.data(WEIGHT_KEY):
+        max_weight = max(max_weight, weight)
+    for v0, v1, weight in matching_graph.edges.data(WEIGHT_KEY):
+        prev_weight = matching_graph[v0][v1][WEIGHT_KEY]
+        matching_graph[v0][v1][WEIGHT_KEY] = max_weight - prev_weight + 1
+    # Perform matching
+    matched_labels = max_weight_matching(matching_graph, maxcardinality=True)
+    # Prune paths to ancilla nodes
     matching = []
     for pair in matched_labels:
         matched_pair = []
@@ -125,28 +134,26 @@ def manhattan_graph(lattice, coords):
     '''Generate a fully connected graph between syndrome coordinates
 
     Assumes uniform error probability and uses Manhattan distance
-    to scale edge weights.
+    to calculate distance between sites.
     '''
-    L, W = lattice.shape
     graph = nx.Graph()
     paths = defaultdict(dict)
-    def add_path(v0, v1):
-        weight, path = manhattan_distance(lattice, v0, v1, make_path=True)
-        graph.add_edge(v0, v1, weight=weight)
-        paths[v0][v1] = path
-        paths[v1][v0] = path
-
     for i, v0 in enumerate(coords[:-1]):
         for v1 in coords[i+1:]:
-            add_path(v0, v1)
+            dist, path = manhattan_distance(
+                lattice, v0, v1, make_path=True)
+            update_paths(graph, paths, v0, v1, dist, path)
     rough_vertices = get_rough_vertices(lattice, len(coords))
     if rough_vertices:
         # Connect rough vertices to each other
         add_ancilla_nodes(graph, rough_vertices)
         # Connect rough vertices to rest of vertices
-        for rv in rough_vertices:
-            for v in coords:
-                add_path(rv, v)
+        rv0 = rough_vertices[0]
+        for v in coords:
+            dist, path = manhattan_distance(
+                lattice, rv0, v, make_path=True)
+            for rv in rough_vertices:
+                update_paths(graph, paths, rv, v, dist, path)
     return graph, paths
 
 
@@ -207,38 +214,42 @@ def dijkstra_graph(lattice, homes):
 
     Uses dijkstra's algorithm to find the minimum distance between all coords marked home.
     '''
-
-    L, W = lattice.shape
     lattice_graph = lattice_to_graph(lattice)
     reduced_graph = nx.Graph()
     paths = defaultdict(dict)
-    def compute_dijkstra(source, target):
-        distance, path = single_source_dijkstra(lattice_graph, source, target)
-        paths[source][target] = path
-        paths[target][source] = path
-        reduced_graph.add_edge(source, target, weight=distance)
-
     for i, source in enumerate(homes[:-1]):
         for target in homes[i+1:]:
-            compute_dijkstra(source, target)
+            distance, path = single_source_dijkstra(
+                lattice_graph, source, target)
+            update_paths(
+                reduced_graph, paths, source, target, distance, path)
     rough_vertices = get_rough_vertices(lattice, len(homes))
     if rough_vertices:
         # Connect rough vertices to each other
         add_ancilla_nodes(reduced_graph, rough_vertices)
         # Connect rough vertices to rest of graph
+        rv0 = rough_vertices[0]
         xs, ys = lattice.grid[:, lattice.sites == False]
-        for rv in rough_vertices:
-            for b in zip(xs, ys):
-                lattice_graph.add_edge(rv, b, weight=ANCILLA_WEIGHT)
-            # Calculate shortest paths from rough vertices to syndrome sites
+        for b in zip(xs, ys):
+            lattice_graph.add_edge(rv0, b, weight=ANCILLA_WEIGHT)
             for target in homes:
-                compute_dijkstra(rv, target)
+                distance, path = single_source_dijkstra(
+                    lattice_graph, rv0, target)
+                for rv in rough_vertices:
+                    update_paths(
+                        reduced_graph, paths, rv, target, distance, path)
     return reduced_graph, paths
+
+
+def update_paths(graph, paths, v0, v1, dist, path):
+    graph.add_edge(v0, v1, weight=dist)
+    paths[v0][v1] = path
+    paths[v1][v0] = path
 
 
 def add_ancilla_nodes(graph, rough_vertices):
     ancilla = generate_rough_cluster(rough_vertices)
-    graph.add_edges_from(ancilla.edges)
+    graph.add_weighted_edges_from(ancilla.edges.data(WEIGHT_KEY))
 
 
 def generate_rough_cluster(vertex_labels, weight=ANCILLA_WEIGHT):

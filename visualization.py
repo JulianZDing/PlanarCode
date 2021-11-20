@@ -150,18 +150,13 @@ def plot_matchings(lattice, syndrome, pathfinding=None):
 
     matching, paths = min_weight_syndrome_matching(lattice, syndrome, pathfinding)
     for i, pair in enumerate(matching):
-        valid_pair = []
         for coord in pair:
-            if coord is None:
-                continue
-            valid_pair.append(coord)
-            x, y = coord
-            ax.text(x, y, s=str(i), c='green', fontsize=20, zorder=10)
-        if len(valid_pair) > 1:
-            path = paths[i]
-            s0x, s0y = path[0]
-            for s1x, s1y in path[1:]:
-                if s1x < L and s1y < W:
-                    ax.plot((s0x, s1x), (s0y, s1y), c='green', linewidth=5, zorder=9)
-                s0x = s1x
-                s0y = s1y
+            if is_real_site(lattice, coord):
+                x, y = coord
+                ax.text(x, y, s=str(i), c='green', fontsize=20, zorder=10)
+        path = paths[i]
+        s0x, s0y = path[0]
+        for s1x, s1y in path[1:]:
+            ax.plot((s0x, s1x), (s0y, s1y), c='green', linewidth=5, zorder=9)
+            s0x = s1x
+            s0y = s1y
