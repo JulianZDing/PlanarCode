@@ -47,8 +47,8 @@ def plot_planar_code(code, plot_dual=True, show_errors=False, show_syndrome=Fals
     if plot_dual:
         boundaries = primal.boundaries
         dual = code.dual
-        x_offset = 0.5 * (1 if boundaries[0] != PlanarLattice.SMOOTH else -1)
-        y_offset = 0.5 * (1 if boundaries[1] != PlanarLattice.SMOOTH else -1)
+        x_offset = 0.5 * (1 if ~boundaries[0] else -1)
+        y_offset = 0.5 * (1 if ~boundaries[1] else -1)
         plot_sites(
             ax, dual, x_offset=x_offset, y_offset=y_offset, **DUAL_SITES)
         plot_edges(
@@ -64,7 +64,7 @@ def plot_planar_code(code, plot_dual=True, show_errors=False, show_syndrome=Fals
             )
 
     if save_as:
-        plt.savefig(save_as)
+        plt.savefig(save_as, bbox_inches='tight')
 
     
 def plot_sites(ax, lattice, x_offset=0, y_offset=0, **kwargs):
@@ -81,30 +81,7 @@ def plot_edges(
             L, W = lattice.shape
             s0x, s0y = s0
             s1x, s1y = s1
-            arrow_args = [s0x + x_offset, s0y + y_offset]
-            right = (
-                s0x == L-1 and s0x > s1x
-                and lattice.boundaries[0] == PlanarLattice.PERIODIC
-                and lattice.sites[s0]
-            )
-            upper = (
-                s0y == W-1 and s0y > s1y
-                and lattice.boundaries[1] == PlanarLattice.PERIODIC
-                and lattice.sites[s0]
-            )
-            if right and upper:
-                if s0x > s1x:
-                    arrow_args += [1, 0]
-                else:
-                    arrow_args += [0, 1]
-            elif right:
-                arrow_args += [1, 0]
-            elif upper:
-                arrow_args += [0, 1]
-            if len(arrow_args) == 4:
-                ax.arrow(
-                    *arrow_args, length_includes_head=True, width=0, head_width=0.1, **style)
-            elif (lattice.sites[s0] or lattice.sites[s1]) and s1x < L and s1y < W:
+            if (lattice.sites[s0] or lattice.sites[s1]) and s1x < L and s1y < W:
                 ax.plot(
                     np.array((s0x,s1x)) + x_offset,
                     np.array((s0y,s1y)) + y_offset,
@@ -151,7 +128,7 @@ def plot_matchings(lattice, syndrome, pathfinding=None):
     matching, paths = min_weight_syndrome_matching(lattice, syndrome, pathfinding)
     for i, pair in enumerate(matching):
         for coord in pair:
-            if is_real_site(lattice, coord):
+            if lattice.is_real_site(coord):
                 x, y = coord
                 ax.text(x, y, s=str(i), c='green', fontsize=20, zorder=10)
         path = paths[i]
@@ -160,3 +137,32 @@ def plot_matchings(lattice, syndrome, pathfinding=None):
             ax.plot((s0x, s1x), (s0y, s1y), c='green', linewidth=5, zorder=9)
             s0x = s1x
             s0y = s1y
+
+
+def plot_error_probabilities(lattice, save_as=None):
+    '''Plot edges and associated error probabilities'''
+    fig, ax = plt.subplots(
+        1, 1, figsize=[
+            asymptotic_length_scale(i) for i in lattice.shape]
+    )
+    ax.set_aspect('equal')
+    ax.grid(False)
+    ax.set_frame_on(False)
+    plot_sites(ax, lattice, **PRIMAL_SITES)
+
+    graph = lattice.to_graph()
+    for s0, s1, weight in graph.edges.data(WEIGHT_KEY):
+        s0x, s0y = s0
+        s1x, s1y = s1
+        ax.plot((s0x, s1x), (s0y, s1y), **PRIMAL_EDGES)
+        rot = 315 if (s0x != s1x) and (s0y != s1y) else 0
+        ax.text(
+            s0x+(s1x-s0x)/2, s0y+(s1y-s0y)/2, str(round(weight, 4)),
+            c='blue', backgroundcolor='white',
+            bbox=dict(facecolor='white', edgecolor='black'),
+            weight='bold', ha='center', va='center',
+            rotation=rot, zorder=10
+        )
+
+    if save_as:
+        plt.savefig(save_as, bbox_inches='tight')
