@@ -112,43 +112,58 @@ def boundary_search(p_range, r_range, threshold, split=2, max_depth=8, **kwargs)
     split -- number of partitions to make in each dimension
     max_depth -- maximum number of splits
     '''
+    def generate_ids(offset, depth):
+        step = split ** (max_depth - depth)
+        ids = [offset]
+        for i in range(1, split+1):
+            ids.append(offset + i*step)
+        return ids
+
     grid_size = split ** max_depth + 1
-    points = split + 1
     canvas = np.zeros((grid_size, grid_size))
     P = np.linspace(*p_range, grid_size)
     R = np.linspace(*r_range, grid_size)
 
-    worklist = defaultdict(list, {1: [(p_range, r_range)]})
     results = {}
+    starting_ids = generate_ids(0, 1)
+    worklist = defaultdict(list, {1: [(starting_ids, starting_ids)]})
     for depth in range(1, max_depth+1):
-        for pr, rr in worklist[depth]:
-            p_array = np.linspace(*pr, points)
-            r_array = np.linspace(*rr, points)
-
-            box = np.zeros((points, points), dtype=bool)
-            for i, p in enumerate(p_array):
-                for j, r in enumerate(r_array):
-                    key = (p, r)
+        for p_ids, r_ids in worklist[depth]:
+            for p_idx, i in enumerate(p_ids):
+                for r_idx, j in enumerate(r_ids):
+                    key = (i, j)
                     if key in results:
                         thresh = results[key]
                     else:
+                        p = P[i]
+                        r = R[j]
                         thresh = threshold(p, r, **kwargs)
                         results[key] = thresh
-                        p0 = p_array[i-1]
-                        p1 = p_array[i]
-                        r0 = r_array[j-1]
-                        r1 = r_array[j]
-                        select_p = (P >= p0) & (P < p1)
-                        select_r = (R >= r0) & (R < r1)
+
+                        select_p = (P <= p)
+                        if p_idx > 0:
+                            p0 = P[p_ids[p_idx-1]]
+                            select_p = select_p & (P > p0)
+
+                        select_r = (R <= r)
+                        if r_idx > 0:
+                            r0 = R[r_ids[r_idx-1]]
+                            select_r = select_r & (R > r0)
+
                         sp, sr = np.meshgrid(select_p, select_r)
                         np.putmask(canvas, sp & sr, thresh)
-                    box[i,j] = thresh
 
             if depth != max_depth:
-                for i in range(points-1):
-                    for j in range(points-1):
-                        if any([box[i,j] != t for t in (box[i+1,j], box[i,j+1], box[i+1,j+1])]):
-                            next_pr = (p_array[i], p_array[i+1])
-                            next_rr = (r_array[j], r_array[j+1])
-                            worklist[depth+1].append((next_pr, next_rr))
-    return canvas, results
+                for p_idx, i in enumerate(p_ids[:-1]):
+                    for r_idx, j in enumerate(r_ids[:-1]):
+                        next_i = p_ids[p_idx+1]
+                        next_j = r_ids[r_idx+1]
+                        corners = [
+                            results[(i,j)], results[(next_i,j)],
+                            results[(i,next_j)], results[(next_i,next_j)]
+                        ]
+                        if any([corners[0] != t for t in corners[1:]]):
+                            worklist[depth+1].append(
+                                (generate_ids(i, depth+1), generate_ids(j, depth+1)))
+
+    return canvas, {(P[i], R[j]): thresh for (i, j), thresh in results.items()}
