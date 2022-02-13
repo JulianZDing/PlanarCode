@@ -54,7 +54,6 @@ class PlanarLattice:
             raise IndexError(
                 f'Error probability array of shape {p.shape} does not match a lattice with edge dimensions {self.edges.shape}')
         self.p = p
-        self.original_p = np.copy(p)
 
     
     def to_graph(self, error_model=None, p_scaling_fn=None):
@@ -161,9 +160,7 @@ class PlanarLattice:
 
     def apply_errors(self):
         '''Apply errors on edge operators according to self.p'''
-        probs = np.random.rand(*self.edges.shape)
-        errors = self.p > probs
-        self.apply_edge_operator(errors)
+        self.apply_edge_operator(np.random.rand(*self.edges.shape) < self.p)
 
     
     def measure_syndrome(self):
@@ -206,6 +203,10 @@ class PlanarLattice:
         if np.sum(self.measure_syndrome()) > 0:
             raise LogicalException(
                 'Non-trivial syndrome detected; lattice is not in the codespace.')
+        return self._detect_logical_errors(initial_z)
+
+    
+    def _detect_logical_errors(self, initial_z):
         d = np.argmin(self.boundaries)
         check_row = self.shape[d] // 2
         indices = {d: check_row, (self.edges.ndim-1): d}
@@ -217,7 +218,6 @@ class PlanarLattice:
     def reset(self):
         '''Reset the error state of the lattice'''
         self.edges = np.zeros(self.edges.shape, dtype=bool)
-        self.p = np.copy(self.original_p)
         
     
     def _set_lattice_sites(self):
@@ -262,7 +262,7 @@ class PlanarLattice:
 
 class PlanarCode:
     
-    def __init__(self, L, W=None, boundaries=DEFAULT_BOUNDS, pz=0.05, px=None):
+    def __init__(self, L, W=None, boundaries=DEFAULT_BOUNDS, pz=0, px=None):
         '''Class definition of a planar code.
         
         Defines edge and site operators on primal lattice, plaquette operators on dual lattice.
@@ -339,7 +339,7 @@ class PlanarCode:
             self.tick += 1
     
     
-    def measure_syndrome(self, advance=0, **kwargs):
+    def measure_syndrome(self, advance=0):
         '''Measure the error syndrome at the current time
         
         Nontrivial syndromes on the primal and dual lattices are represented by True values.
@@ -351,10 +351,7 @@ class PlanarCode:
         '''
         syndromes = []
         for lattice in self.lattices:
-            try:
-                syndromes.append(lattice.measure_syndrome(**kwargs))
-            except:
-                syndromes.append(lattice.measure_syndrome())
+            syndromes.append(lattice.measure_syndrome())
         if advance > 0:
             self.advance(advance)
         return syndromes

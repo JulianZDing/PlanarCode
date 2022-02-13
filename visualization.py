@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from planar_code import PlanarLattice
 from graph_operations import *
 
 PRIMAL_EDGES = {'color': 'black', 'linestyle': 'solid', 'linewidth': 1, 'zorder': 1}
@@ -35,36 +34,47 @@ def plot_planar_code(code, plot_dual=True, show_errors=False, show_syndrome=Fals
     )
     ax.set_aspect('equal')
     ax.grid(False)
-    plot_sites(ax, primal, **PRIMAL_SITES)
-    plot_edges(
-        ax, primal, errors=show_errors,
-        edge_style=PRIMAL_EDGES, error_style=PRIMAL_ERRORS
-    )
-    if show_syndrome:
-        primal_syndrome, dual_syndrome = code.measure_syndrome()
-        plot_syndrome(ax, primal, primal_syndrome, **PRIMAL_SYNDROME)
+    plot_lattice(ax, primal, show_errors=show_errors, show_syndrome=show_syndrome)
     
     if plot_dual:
         boundaries = primal.boundaries
         dual = code.dual
         x_offset = 0.5 * (1 if ~boundaries[0] else -1)
         y_offset = 0.5 * (1 if ~boundaries[1] else -1)
-        plot_sites(
-            ax, dual, x_offset=x_offset, y_offset=y_offset, **DUAL_SITES)
-        plot_edges(
-            ax, dual, errors=show_errors,
+        plot_lattice(
+            ax, dual, show_errors=show_errors, show_syndrome=show_syndrome,
             x_offset=x_offset, y_offset=y_offset,
-            edge_style=DUAL_EDGES, error_style=DUAL_ERRORS
+            site_style=DUAL_SITES, edge_style=DUAL_EDGES,
+            error_style=DUAL_ERRORS, syndrome_style=DUAL_SYNDROME
         )
-        if show_syndrome:
-            plot_syndrome(
-                ax, dual, dual_syndrome,
-                x_offset=x_offset, y_offset=y_offset,
-                **DUAL_SYNDROME
-            )
 
     if save_as:
         plt.savefig(save_as, bbox_inches='tight')
+
+
+def plot_lattice(
+    ax, lattice, show_errors=True, show_syndrome=True,
+    x_offset=0, y_offset=0,
+    site_style=PRIMAL_SITES, edge_style=PRIMAL_EDGES,
+    error_style=PRIMAL_ERRORS, syndrome_style=PRIMAL_SYNDROME
+):
+    plot_sites(
+        ax, lattice, x_offset=x_offset, y_offset=y_offset, **site_style)
+    plot_edges(
+        ax, lattice, errors=show_errors,
+        x_offset=x_offset, y_offset=y_offset,
+        edge_style=edge_style, error_style=error_style
+    )
+    if show_syndrome:
+        try:
+            syndrome = lattice.measure_syndrome(debug=True)
+        except TypeError:
+            syndrome = lattice.measure_syndrome()
+        plot_syndrome(
+            ax, lattice, syndrome,
+            x_offset=x_offset, y_offset=y_offset,
+            **syndrome_style
+        )
 
     
 def plot_sites(ax, lattice, x_offset=0, y_offset=0, **kwargs):
@@ -100,9 +110,15 @@ def plot_edges(
                 else:
                     style = edge_style
                 plot_edge(tuple(s0), tuple(s1), style)
+    if errors and hasattr(lattice, 'correlated_syndromes'):
+        for sites, error in lattice.correlated_syndromes.items():
+            if error:
+                plot_edge(*sites, error_style)
 
 
 def plot_syndrome(ax, lattice, syndrome, x_offset=0, y_offset=0, **kwargs):
+    if type(syndrome) == tuple:
+        syndrome = syndrome[0]
     syndrome_x = lattice.grid[:, syndrome][0] + x_offset
     syndrome_y = lattice.grid[:, syndrome][1] + y_offset
     ax.scatter(syndrome_x, syndrome_y, **kwargs)
@@ -126,6 +142,7 @@ def plot_matchings(lattice, syndrome, pathfinding=None):
     plot_syndrome(ax, lattice, syndrome, **PRIMAL_SYNDROME)
 
     matching, paths = min_weight_syndrome_matching(lattice, syndrome, pathfinding)
+    print(matching)
     for i, pair in enumerate(matching):
         for coord in pair:
             if lattice.is_real_site(coord):
