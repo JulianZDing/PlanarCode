@@ -103,7 +103,7 @@ class CorrelatedPlanarLattice(PlanarLattice):
         Repeats syndrome measurements until success is achieved at all sites
         
         Keyword arguments:
-        failed -- coordinates/mask for syndrome measurements that will fail
+        failed_sites -- coordinates/mask for syndrome measurements that will fail
         debug -- prevents failed measurements
         '''
         syndrome = super().measure_syndrome()
@@ -132,8 +132,7 @@ class CorrelatedPlanarLattice(PlanarLattice):
 
         Returns number of tries before success
         '''
-        failed = np.random.rand() < self.p_fail[x, y]
-        if failed:
+        if np.random.rand() < self.p_fail[x, y]:
             return self.measure_syndrome_again(x, y, tries=tries+1)
         return tries
 
@@ -157,7 +156,14 @@ class CorrelatedPlanarLattice(PlanarLattice):
     def reset_error_model(self):
         '''Reset the error model'''
         self.correlated_syndrome_p = defaultdict(float)
-        self.heralded_p = np.copy(self.p)
+        self.heralded_p = np.zeros(self.p.shape)
+        self.heralded_p[:] = self.p
+    
+
+    def reset(self):
+        '''Reset the error state and error model of the lattice'''
+        super().reset()
+        self.reset_error_model()
 
 
 class PhotonicPlanarCode(PlanarCode):

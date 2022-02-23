@@ -85,8 +85,9 @@ class PlanarLattice:
                     v1_is_site = self.sites[v1]
                     if v0_is_site or v1_is_site:
                         p = error_model[x, y, d]
-                        weight = p if p_scaling_fn is None else p_scaling_fn(p)
-                        graph.add_edge(v0, v1, weight=weight)
+                        if p != 0:
+                            weight = p if p_scaling_fn is None else p_scaling_fn(p)
+                            graph.add_edge(v0, v1, weight=weight)
         return graph
 
     
@@ -94,12 +95,14 @@ class PlanarLattice:
         '''Determines if a coordinate v = (x, y) is a valid site within the lattice'''
         L, W = self.shape
         x, y = v
-        return x < L and y < W
+        return x >= 0 and x < L and y >= 0 and y < W
 
     
     def is_real_edge(self, coords):
         '''Determines if a coordinate (x, y, d) is a valid edge within the lattice'''
         x, y, d = coords
+        if x < 0 or y < 0 or d < 0:
+            return False
         try:
             vx, vy = self.edge_endpoints[:, x, y, d]
             s0 = (vx[0], vy[0])

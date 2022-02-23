@@ -13,7 +13,7 @@ WEIGHT_KEY = 'weight'
 def p_to_dist(p):
     if p > 0:
         return np.log((1-p) / p)
-    return 0
+    return np.inf
 
 def _min_to_max_weight(graph):
     max_weight = 0
@@ -179,9 +179,10 @@ def dijkstra_graph(lattice, homes, **kwargs):
     for i, source in enumerate(homes[:-1]):
         distances, these_paths = single_source_dijkstra(lattice_graph, source)
         for target in homes[i+1:]:
-            distance = distances[target]
-            path = these_paths[target]
-            update_paths(reduced_graph, paths, source, target, distance, path)
+            if target in distances:
+                distance = distances[target]
+                path = these_paths[target]
+                update_paths(reduced_graph, paths, source, target, distance, path)
     # Connect rough vertices to each other
     rough_vertices = get_rough_vertices(lattice, len(homes))
     if len(rough_vertices) > 0:
@@ -190,14 +191,17 @@ def dijkstra_graph(lattice, homes, **kwargs):
         rv0 = rough_vertices[0]
         xs, ys = lattice.grid[:, lattice.sites == False]
         for b in zip(xs, ys):
-            lattice_graph.add_edge(rv0, b, weight=ANCILLA_WEIGHT)
+            if b in lattice_graph.nodes:
+                lattice_graph.add_edge(rv0, b, weight=ANCILLA_WEIGHT)
         # Compute shortest paths from syndrome sites to boundaries
-        distances, rough_paths = single_source_dijkstra(lattice_graph, rv0)
-        for target in homes:
-            distance = distances[target]
-            path = rough_paths[target]
-            for rv in rough_vertices:
-                update_paths(reduced_graph, paths, rv, target, distance, path)
+        if rv0 in lattice_graph.nodes:
+            distances, rough_paths = single_source_dijkstra(lattice_graph, rv0)
+            for target in homes:
+                if target in distances:
+                    distance = distances[target]
+                    path = rough_paths[target]
+                    for rv in rough_vertices:
+                        update_paths(reduced_graph, paths, rv, target, distance, path)
     return reduced_graph, paths
 
 

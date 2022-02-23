@@ -130,7 +130,7 @@ def asymptotic_length_scale(x, base=1, maximum=50):
     return x
 
 
-def plot_matchings(lattice, syndrome, pathfinding=None):
+def plot_matchings(lattice, syndrome, matching, paths):
     '''Plot syndrome matching pairs'''
     L, W = lattice.shape
     fig, ax = plt.subplots(1, 1, figsize=(L,L))
@@ -140,9 +140,6 @@ def plot_matchings(lattice, syndrome, pathfinding=None):
         edge_style=PRIMAL_EDGES, error_style=PRIMAL_ERRORS
     )
     plot_syndrome(ax, lattice, syndrome, **PRIMAL_SYNDROME)
-
-    matching, paths = min_weight_syndrome_matching(lattice, syndrome, pathfinding)
-    print(matching)
     for i, pair in enumerate(matching):
         for coord in pair:
             if lattice.is_real_site(coord):
@@ -156,7 +153,7 @@ def plot_matchings(lattice, syndrome, pathfinding=None):
             s0y = s1y
 
 
-def plot_error_probabilities(lattice, save_as=None):
+def plot_error_probabilities(lattice, verbose=True, syndrome=None, save_as=None):
     '''Plot edges and associated error probabilities'''
     fig, ax = plt.subplots(
         1, 1, figsize=[
@@ -172,14 +169,18 @@ def plot_error_probabilities(lattice, save_as=None):
         s0x, s0y = s0
         s1x, s1y = s1
         ax.plot((s0x, s1x), (s0y, s1y), **PRIMAL_EDGES)
-        rot = 315 if (s0x != s1x) and (s0y != s1y) else 0
-        ax.text(
-            s0x+(s1x-s0x)/2, s0y+(s1y-s0y)/2, str(round(weight, 4)),
-            c='blue', backgroundcolor='white',
-            bbox=dict(facecolor='white', edgecolor='black'),
-            weight='bold', ha='center', va='center',
-            rotation=rot, zorder=10
-        )
+        if verbose:
+            rot = 315 if (s0x != s1x) and (s0y != s1y) else 0
+            ax.text(
+                s0x+(s1x-s0x)/2, s0y+(s1y-s0y)/2, str(round(weight, 4)),
+                c='blue', backgroundcolor='white',
+                bbox=dict(facecolor='white', edgecolor='black'),
+                weight='bold', ha='center', va='center',
+                rotation=rot, zorder=10
+            )
+    
+    if syndrome is not None:
+        plot_syndrome(ax, lattice, syndrome, **PRIMAL_SYNDROME)
 
     if save_as:
         plt.savefig(save_as, bbox_inches='tight')
