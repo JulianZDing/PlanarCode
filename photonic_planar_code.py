@@ -95,7 +95,7 @@ class CorrelatedPlanarLattice(PlanarLattice):
         self._apply_edge_operators_edges([(v0x, v0y, 0), (v1x, v1y, 1)])
     
 
-    def measure_syndrome(self, failed_sites=None, debug=False):
+    def measure_syndrome(self, failed_sites=None, max_retries=np.inf, debug=False):
         '''
         Measure the error syndrome
         
@@ -104,6 +104,7 @@ class CorrelatedPlanarLattice(PlanarLattice):
         
         Keyword arguments:
         failed_sites -- coordinates/mask for syndrome measurements that will fail
+        max_retries -- cap to the number of possible retries before success (default: unlimited)
         debug -- prevents failed measurements
         '''
         syndrome = super().measure_syndrome()
@@ -116,12 +117,12 @@ class CorrelatedPlanarLattice(PlanarLattice):
         xs, ys = self.grid[:, failed_sites]
         retries = {}
         for x, y in zip(xs,ys):
-            retries[(x, y)] = self.measure_syndrome_again(x, y)
+            retries[(x, y)] = self.measure_syndrome_again(x, y, max_retries)
         
         return syndrome, retries
     
 
-    def measure_syndrome_again(self, x, y, tries=1):
+    def measure_syndrome_again(self, x, y, max_retries):
         '''
         Repeat measurement of error syndrome at the site x, y.
         Can fail again according to probability of measurement failure.
@@ -129,11 +130,16 @@ class CorrelatedPlanarLattice(PlanarLattice):
         Arguments:
         x -- site x coordinate
         y -- site y coordinate
+        max_retries -- cap to the number of possible retries before success
 
         Returns number of tries before success
         '''
-        if np.random.rand() < self.p_fail[x, y]:
-            return self.measure_syndrome_again(x, y, tries=tries+1)
+        tries = 1
+        while tries < max_retries:
+            if np.random.rand() < self.p_fail[x, y]:
+                tries += 1
+            else:
+                break
         return tries
 
     
